@@ -13,14 +13,11 @@ import (
 	"time"
 )
 
-// The pointer to the actual logfile, used for cleanup after the application is closed
+// The pointer to the logfile, used for cleanup after the application is closed
 var logFile *os.File
 
 // The tasks to run
 var tasks []*Task
-
-// The duration between each run of a task (same index as the associated task)
-var durations []time.Duration
 
 func init() {
 	// Setup user input flags
@@ -62,7 +59,7 @@ func init() {
 
 func main() {
 	// Cleanup
-	defer logFile.Close()
+	defer logFile.Close().Error()
 
 	if len(tasks) == 0 {
 		// Can't run nothing
