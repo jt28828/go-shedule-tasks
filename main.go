@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bufio"
 	"bytes"
 	"flag"
 	"fmt"
@@ -31,7 +32,17 @@ func init() {
 
 	// Read tasks from the manual flags first
 	taskList := strings.Split(*taskStr, ",")
-	durationList := readDurationStr(*durationStr)
+	durationList := readDurationListStr(*durationStr)
+
+	// Read tasks from the defined file if it was provided
+	if *taskFilePath != "" {
+		println("Reading tasks file")
+		fileTasks, fileDurations := parseTasksFile(*taskFilePath)
+		taskList = append(taskList, fileTasks...)
+		durationList = append(durationList, fileDurations...)
+	}
+
+	// Setup the tasks map
 
 	// Setup logging
 	setupLogFile(*logfilePath)
@@ -39,20 +50,86 @@ func init() {
 
 func main() {
 	// Cleanup
+	println("hello")
 	defer logFile.Close()
 }
 
+// Parses a tasks file and returns 2 slices with matching indexes, 1 with the tasks and 1 with the durations
+func parseTasksFile(taskFilePath string) ([]string, []time.Duration) {
+	file, err := os.Open(taskFilePath)
+
+	if err != nil {
+		// Log but don't stop the application, use any existing tasks instead
+		log.Println(fmt.Sprintf("ERROR!: Failed to open taskfile at %s. Not running tasks defined in this file", taskFilePath))
+		return []string{}, []time.Duration{}
+	}
+
+	fileScanner := bufio.NewScanner(file)
+
+	var fileTasks []string
+	var fileDurations []time.Duration
+
+	for fileScanner.Scan() {
+		task, duration, parseErr := parseTaskFileRow(fileScanner.Text())
+		if parseErr == nil {
+			// Only add to the list if no errors occurred, otherwise skip
+			fileTasks = append(fileTasks, task)
+			fileDurations = append(fileDurations, duration)
+		}
+	}
+
+	if fileScanner.Err() != nil {
+		log.Println(fmt.Sprintf("ERROR!: Failed to read the taskfile. %v", fileScanner.Err()))
+	}
+
+	return fileTasks, fileDurations
+}
+
+// Parses the row of a task file, handling any panics from reading by not returning that task
+func parseTaskFileRow(fileRow string) (string, time.Duration, error) {
+	// Handle panics from reading the duration
+	splitTask := strings.Split(fileRow, " ")
+	if len(splitTask) > 2 {
+		// Invalid row, can't parse
+		err := fmt.Errorf("ERROR!: Invalid row in a provided task file, can't parse %s", fileRow)
+		return "", 0, err
+	}
+
+	task := splitTask[0]
+	// TODO rework once panic logic different
+	duration := parseDurationStr(splitTask[1])
+
+	return task, duration, nil
+}
+
 // Reads an array of duration strings and converts them into a slice of durations
-func readDurationStr(durationStr string) []time.Duration {
+func readDurationListStr(durationStr string) []time.Duration {
 	durations := strings.Split(durationStr, ",")
 
 	var durationSlice []time.Duration
+
 	for _, durationText := range durations {
-		if duration, err := time.ParseDuration(durationText); err != nil {
-			// Exit application early with warning
-			log.Println(fmt.Sprintf("ERROR!: A duration was entered incorrectly: %s. Duration needs to be in the format: 1h1m1s1ms", durationText))
+		// Append the parsed duration to the slice
+		durationSlice = append(durationSlice, parseDurationStr(durationText))
+	}
+
+	return durationSlice
+}
+
+// Parses a duration string and panicsif it is invalid as can't support running tasks without valid duration between runs
+// TODO make not panic so can be reused
+func parseDurationStr(durationText string) time.Duration {
+	duration, err := time.ParseDuration(durationText)
+	if err != nil {
+		// Exit application early with warning
+		log.Panicf("ERROR!: A duration was entered incorrectly: %v", err)
+	} else {
+		// Block negative values
+		if duration < 0 {
+			log.Panicf("ERROR!: A duration had a negative value: %s. This application doesn't have the ability to time travel to the past to run tasks", durationText)
 		}
 	}
+	return duration
 }
 
 // Sets up the system logger to use the file specified
