@@ -17,21 +17,21 @@ import (
 var logFile *os.File
 
 // The tasks to run
-var tasks map[string]*Task
+var tasks []*Task
 
 // The duration between each run of a task (same index as the associated task)
 var durations []time.Duration
 
 func init() {
 	// Setup user input flags
-	taskStr := flag.String("tasks", "", "The comma separated list of manually defined tasks to run. Can be a command or a path to a local script file (.sh only)")
+	taskListString := flag.String("tasks", "", "The comma separated list of manually defined tasks to run. Can be a command or a path to a local script file (.sh only)")
 	durationStr := flag.String("durations", "", "The comma separated list of durations to wait between running tasks. Durations should be in the same order as their associated tasks")
 	logfilePath := flag.String("logs", "./task-scheduler.log", "Where to output application logs")
 	taskFilePath := flag.String("file", "", "The location of a predefined task file, should have one task per line in the following format: \"/etc/path/to/my/script.sh 2h5m10s\" to run the designated script / task every 2hrs 5mins and 10 seconds")
 	flag.Parse()
 
 	// Read tasks from the manual flags first
-	taskList := strings.Split(*taskStr, ",")
+	taskList := strings.Split(*taskListString, ",")
 	durationList := readDurationListStr(*durationStr)
 
 	// Read tasks from the defined file if it was provided
@@ -42,8 +42,19 @@ func init() {
 		durationList = append(durationList, fileDurations...)
 	}
 
-	// Setup the tasks map
-	tasks = createTasksMap(taskList, durationList)
+	// Setup the task list
+	for i := 0; i < len(taskList); i++ {
+		taskCommand := taskList[i]
+
+		thisTask := Task{
+			taskText:        taskCommand,
+			isShellScript:   strings.HasSuffix(taskCommand, ".sh"),
+			timeBetweenRuns: durationList[i],
+			mutex:           &sync.Mutex{},
+		}
+
+		tasks = append(tasks, &thisTask)
+	}
 
 	// Setup logging
 	setupLogFile(*logfilePath)
@@ -51,28 +62,32 @@ func init() {
 
 func main() {
 	// Cleanup
-	println("hello")
 	defer logFile.Close()
+
+	if len(tasks) == 0 {
+		// Can't run nothing
+		log.Fatal("No tasks provided to the application")
+	}
+
+	println("Tasks parsed correctly, now running tasks on a schedule")
+
+	// Skip the first one in the list as it'll be run forever on the main thread
+	for i := 1; i < len(tasks); i++ {
+		go scheduleTask(tasks[i])
+	}
+
+	// Run the first task on the main thread forever to keep the application alive
+	scheduleTask(tasks[0])
 }
 
-// Creates a map of tasks out of the matching task and duration array and assigns a lock to the task to prevent
-// running multiple copies at once
-func createTasksMap(tasks []string, taskWaitDurations []time.Duration) map[string]*Task {
-	taskMap := make(map[string]*Task)
+func scheduleTask(task *Task) {
 
-	if len(tasks) != len(taskWaitDurations) {
-		// Can't match up tasks with durations
-		log.Fatal("Tasks and durations didn't match, each task needs its own duration")
-	}
-	for i := 0; i < len(tasks); i++ {
-		thisTask := Task{
-			timeBetweenRuns: taskWaitDurations[i],
-			lock:            sync.Mutex{},
-		}
+	thisTicker := time.NewTicker(task.timeBetweenRuns)
 
-		taskMap[tasks[i]] = &thisTask
+	for range thisTicker.C {
+		// Run the task every tick from the channel (Every duration)
+		go runTask(task)
 	}
-	return taskMap
 }
 
 // Parses a tasks file and returns 2 slices with matching indexes, 1 with the tasks and 1 with the durations
@@ -182,21 +197,28 @@ func setupLogFile(logPath string) {
 	log.SetOutput(file)
 }
 
-// Runs a command line task. Only allows one of the task to run at a time
-func runCustomCommand(command string, mutex *sync.Mutex) {
-	defer mutex.Unlock()
+// Runs a task that could either be a script or a commandline task.
+// Ensures the task is only run once with a mutex lock
+func runTask(task *Task) {
+	defer task.mutex.Unlock()
 
-	// Run the task exclusively
-	mutex.Lock()
+	// Lock so no other equivalent task can run at the same time
+	task.mutex.Lock()
+	if task.isShellScript {
+		runBashFile(task.taskText)
+	} else {
+		runCustomCommand(task.taskText)
+	}
+}
+
+// Runs a command line task. Only allows one of the task to run at a time
+func runCustomCommand(command string) {
 	cmd := exec.Command(command)
 	runAndLogTask(cmd, command)
 }
 
 // Runs a bash file. Only allows one of the scripts to execute at a time
-func runBashFile(scriptPath string, mutex *sync.Mutex) {
-	defer mutex.Unlock()
-	// Execute the file exclusively
-	mutex.Lock()
+func runBashFile(scriptPath string) {
 	cmd := exec.Command("/usr/bin/bash", scriptPath)
 	runAndLogTask(cmd, scriptPath)
 }
@@ -219,6 +241,8 @@ func runAndLogTask(cmd *exec.Cmd, taskName string) {
 
 // Defines a task struct to allow running exclusive tasks on time
 type Task struct {
+	taskText        string
+	isShellScript   bool
 	timeBetweenRuns time.Duration
-	lock            sync.Mutex
+	mutex           *sync.Mutex
 }
