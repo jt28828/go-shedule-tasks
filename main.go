@@ -16,8 +16,8 @@ import (
 // The pointer to the actual logfile, used for cleanup after the application is closed
 var logFile *os.File
 
-// The tasks or script files to run
-var tasks []string
+// The tasks to run
+var tasks map[string]*Task
 
 // The duration between each run of a task (same index as the associated task)
 var durations []time.Duration
@@ -43,6 +43,7 @@ func init() {
 	}
 
 	// Setup the tasks map
+	tasks = createTasksMap(taskList, durationList)
 
 	// Setup logging
 	setupLogFile(*logfilePath)
@@ -52,6 +53,26 @@ func main() {
 	// Cleanup
 	println("hello")
 	defer logFile.Close()
+}
+
+// Creates a map of tasks out of the matching task and duration array and assigns a lock to the task to prevent
+// running multiple copies at once
+func createTasksMap(tasks []string, taskWaitDurations []time.Duration) map[string]*Task {
+	taskMap := make(map[string]*Task)
+
+	if len(tasks) != len(taskWaitDurations) {
+		// Can't match up tasks with durations
+		log.Fatal("Tasks and durations didn't match, each task needs its own duration")
+	}
+	for i := 0; i < len(tasks); i++ {
+		thisTask := Task{
+			timeBetweenRuns: taskWaitDurations[i],
+			lock:            sync.Mutex{},
+		}
+
+		taskMap[tasks[i]] = &thisTask
+	}
+	return taskMap
 }
 
 // Parses a tasks file and returns 2 slices with matching indexes, 1 with the tasks and 1 with the durations
@@ -194,4 +215,10 @@ func runAndLogTask(cmd *exec.Cmd, taskName string) {
 
 	// Succeeded, print the response in a human readable log format
 	log.Println(fmt.Sprintf("%s - %s", taskName, out.String()))
+}
+
+// Defines a task struct to allow running exclusive tasks on time
+type Task struct {
+	timeBetweenRuns time.Duration
+	lock            sync.Mutex
 }
