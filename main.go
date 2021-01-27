@@ -59,7 +59,7 @@ func init() {
 
 func main() {
 	// Cleanup
-	defer logFile.Close().Error()
+	defer logFile.Close()
 
 	if len(tasks) == 0 {
 		// Can't run nothing
@@ -77,6 +77,7 @@ func main() {
 	scheduleTask(tasks[0])
 }
 
+// Run a task on a timer user a channel
 func scheduleTask(task *Task) {
 
 	thisTicker := time.NewTicker(task.timeBetweenRuns)
@@ -230,6 +231,7 @@ func runAndLogTask(cmd *exec.Cmd, taskName string) {
 	if err := cmd.Run(); err != nil {
 		// Task failed, print the failure to the logs and exit
 		log.Println(fmt.Sprintf("ERROR!:  %v", err))
+		return
 	}
 
 	// Succeeded, print the response in a human readable log format
