@@ -1,3 +1,7 @@
 /.idea/
-/dist/
 /task-scheduler.log
+
+#Build artifacts
+/dist/
+*.exe
+*.bin
