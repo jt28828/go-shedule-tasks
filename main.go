@@ -64,10 +64,17 @@ func init() {
 	var taskList stringMultiFlag
 	var durationList durationMultiFlag
 	flag.Var(&taskList, "task", "A manually defined task to run. Can be a command or a path to a local script file (.sh only for now). Can be defined multiple times for many tasks")
-	flag.Var(&durationList, "duration", "The duration to wait between each run of the task. Can be defined multiple times for multiple tasks")
+	flag.Var(&taskList, "t", "A manually defined task to run. Can be a command or a path to a local script file (.sh only for now). Can be defined multiple times for many tasks")
+	flag.Var(&durationList, "duration", "The duration to wait for each task to run (hourly, minutely etc). Needs to be defined at least once for each task")
+	flag.Var(&durationList, "d", "The duration to wait for each task to run (hourly, minutely etc). Needs to be defined at least once for each task")
 	logfilePath := flag.String("logs", "./task-scheduler.log", "Where to output application logs")
 	taskFilePath := flag.String("file", "", "The location of a predefined task file, should have one task per line in the following format: \"/etc/path/to/my/script.sh 2h5m10s\" to run the designated script / task every 2hrs 5mins and 10 seconds")
 	flag.Parse()
+
+	if len(taskList) > len(durationList) {
+		// Can't continue execution
+		log.Fatal("Not all tasks were provided with durations. Every task needs a matching duration value to continue")
+	}
 
 	// Read tasks from the defined file if it was provided
 	if *taskFilePath != "" {
@@ -77,8 +84,7 @@ func init() {
 		durationList = append(durationList, fileDurations...)
 	}
 
-	// Setup the task list
-
+	// Create the task list
 	for i := 0; i < len(taskList); i++ {
 		taskCommand := taskList[i]
 
@@ -177,7 +183,6 @@ func parseTaskFileRow(fileRow string) (string, time.Duration, error) {
 }
 
 // Parses a duration string and returns error if invalid or in the negatives (valid duration but not valid for application)
-// TODO make not panic so can be reused
 func parseDurationStr(durationText string) (time.Duration, error) {
 	duration, err := time.ParseDuration(durationText)
 	if err != nil {
