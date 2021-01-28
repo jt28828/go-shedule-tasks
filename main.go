@@ -19,17 +19,55 @@ var logFile *os.File
 // The tasks to run
 var tasks []*Task
 
+// Allow users to input multiple copies of a single flag.
+// Implements the Var interface from flags
+type stringMultiFlag []string
+
+func (f *stringMultiFlag) String() string {
+	return "StringValue"
+}
+
+func (f *stringMultiFlag) Set(flagVal string) error {
+	// Append with each value that's added
+	*f = append(*f, flagVal)
+	return nil
+}
+
+type durationMultiFlag []time.Duration
+
+func (f *durationMultiFlag) String() string {
+	return "StringValue"
+}
+
+func (f *durationMultiFlag) Set(flagVal string) error {
+	// Attempt to parse the value
+	parsedVal, err := parseDurationStr(flagVal)
+	if err != nil {
+		// Can't continue with invalid durations
+		os.Exit(1)
+	}
+	// Append with each value that's added
+	*f = append(*f, parsedVal)
+	return nil
+}
+
+// Defines a task struct to allow running exclusive tasks on time
+type Task struct {
+	taskText        string
+	isShellScript   bool
+	timeBetweenRuns time.Duration
+	mutex           *sync.Mutex
+}
+
 func init() {
 	// Setup user input flags
-	taskListString := flag.String("tasks", "", "The comma separated list of manually defined tasks to run. Can be a command or a path to a local script file (.sh only)")
-	durationStr := flag.String("durations", "", "The comma separated list of durations to wait between running tasks. Durations should be in the same order as their associated tasks")
+	var taskList stringMultiFlag
+	var durationList durationMultiFlag
+	flag.Var(&taskList, "task", "A manually defined task to run. Can be a command or a path to a local script file (.sh only for now). Can be defined multiple times for many tasks")
+	flag.Var(&durationList, "duration", "The duration to wait between each run of the task. Can be defined multiple times for multiple tasks")
 	logfilePath := flag.String("logs", "./task-scheduler.log", "Where to output application logs")
 	taskFilePath := flag.String("file", "", "The location of a predefined task file, should have one task per line in the following format: \"/etc/path/to/my/script.sh 2h5m10s\" to run the designated script / task every 2hrs 5mins and 10 seconds")
 	flag.Parse()
-
-	// Read tasks from the manual flags first
-	taskList := strings.Split(*taskListString, ",")
-	durationList := readDurationListStr(*durationStr)
 
 	// Read tasks from the defined file if it was provided
 	if *taskFilePath != "" {
@@ -40,11 +78,12 @@ func init() {
 	}
 
 	// Setup the task list
+
 	for i := 0; i < len(taskList); i++ {
 		taskCommand := taskList[i]
 
 		thisTask := Task{
-			taskText:        taskCommand,
+			taskText:        strings.Trim(taskCommand, "\""),
 			isShellScript:   strings.HasSuffix(taskCommand, ".sh"),
 			timeBetweenRuns: durationList[i],
 			mutex:           &sync.Mutex{},
@@ -130,40 +169,30 @@ func parseTaskFileRow(fileRow string) (string, time.Duration, error) {
 	}
 
 	task := splitTask[0]
-	// TODO rework once panic logic different
-	duration := parseDurationStr(splitTask[1])
-
-	return task, duration, nil
-}
-
-// Reads an array of duration strings and converts them into a slice of durations
-func readDurationListStr(durationStr string) []time.Duration {
-	durations := strings.Split(durationStr, ",")
-
-	var durationSlice []time.Duration
-
-	for _, durationText := range durations {
-		// Append the parsed duration to the slice
-		durationSlice = append(durationSlice, parseDurationStr(durationText))
+	if duration, err := parseDurationStr(splitTask[1]); err == nil {
+		return task, duration, nil
+	} else {
+		return "", 0, err
 	}
-
-	return durationSlice
 }
 
-// Parses a duration string and panicsif it is invalid as can't support running tasks without valid duration between runs
+// Parses a duration string and returns error if invalid or in the negatives (valid duration but not valid for application)
 // TODO make not panic so can be reused
-func parseDurationStr(durationText string) time.Duration {
+func parseDurationStr(durationText string) (time.Duration, error) {
 	duration, err := time.ParseDuration(durationText)
 	if err != nil {
 		// Exit application early with warning
-		log.Panicf("ERROR!: A duration was entered incorrectly: %v", err)
+		log.Println(fmt.Sprintf("ERROR!: A duration was entered incorrectly: %v. Only units of (h,m,s,ms) are supported", err))
+		return 0, err
 	} else {
 		// Block negative values
 		if duration < 0 {
-			log.Panicf("ERROR!: A duration had a negative value: %s. This application doesn't have the ability to time travel to the past to run tasks", durationText)
+			negativeErr := fmt.Errorf("ERROR!: A duration had a negative value: %s. This application doesn't have the ability to time travel to the past to run tasks", durationText)
+			log.Println(negativeErr)
+			return 0, negativeErr
 		}
 	}
-	return duration
+	return duration, nil
 }
 
 // Sets up the system logger to use the file specified
@@ -236,12 +265,4 @@ func runAndLogTask(cmd *exec.Cmd, taskName string) {
 
 	// Succeeded, print the response in a human readable log format
 	log.Println(fmt.Sprintf("%s - %s", taskName, out.String()))
-}
-
-// Defines a task struct to allow running exclusive tasks on time
-type Task struct {
-	taskText        string
-	isShellScript   bool
-	timeBetweenRuns time.Duration
-	mutex           *sync.Mutex
 }
