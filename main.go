@@ -19,6 +19,8 @@ var logFile *os.File
 // The tasks to run
 var tasks []*Task
 
+// The shell path for the local os
+
 // Allow users to input multiple copies of a single flag.
 // Implements the Var interface from flags
 type stringMultiFlag []string
@@ -65,8 +67,8 @@ func init() {
 	var durationList durationMultiFlag
 	flag.Var(&taskList, "task", "A manually defined task to run. Can be a command or a path to a local script file (.sh only for now). Can be defined multiple times for many tasks")
 	flag.Var(&taskList, "t", "A manually defined task to run. Can be a command or a path to a local script file (.sh only for now). Can be defined multiple times for many tasks")
-	flag.Var(&durationList, "duration", "The duration to wait for each task to run (hourly, minutely etc). Needs to be defined at least once for each task")
-	flag.Var(&durationList, "d", "The duration to wait for each task to run (hourly, minutely etc). Needs to be defined at least once for each task")
+	flag.Var(&durationList, "duration", "How often a task should run (hourly, minutely etc). Needs to be defined at least once for each task")
+	flag.Var(&durationList, "d", "How often a task should run (hourly, minutely etc). Needs to be defined at least once for each task")
 	logfilePath := flag.String("logs", "./task-scheduler.log", "Where to output application logs")
 	taskFilePath := flag.String("file", "", "The location of a predefined task file, should have one task per line in the following format: \"/etc/path/to/my/script.sh 2h5m10s\" to run the designated script / task every 2hrs 5mins and 10 seconds")
 	flag.Parse()
@@ -167,7 +169,7 @@ func parseTasksFile(taskFilePath string) ([]string, []time.Duration) {
 // Parses the row of a task file, handling any panics from reading by not returning that task
 func parseTaskFileRow(fileRow string) (string, time.Duration, error) {
 	// Handle panics from reading the duration
-	splitTask := strings.Split(fileRow, " ")
+	splitTask := strings.Split(fileRow, "	")
 	if len(splitTask) > 2 {
 		// Invalid row, can't parse
 		err := fmt.Errorf("ERROR!: Invalid row in a provided task file, can't parse %s", fileRow)
@@ -245,7 +247,15 @@ func runTask(task *Task) {
 
 // Runs a command line task. Only allows one of the task to run at a time
 func runCustomCommand(command string) {
-	cmd := exec.Command(command)
+	// Split the command up into the values so exec can find the right executable to run
+	commandVals := strings.Split(command, " ")
+
+	var cmd *exec.Cmd
+	if len(commandVals) == 1 {
+		cmd = exec.Command(commandVals[0])
+	} else {
+		cmd = exec.Command(commandVals[0], commandVals[1:]...)
+	}
 	runAndLogTask(cmd, command)
 }
 
