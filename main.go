@@ -168,16 +168,23 @@ func parseTasksFile(taskFilePath string) ([]string, []time.Duration) {
 
 // Parses the row of a task file, handling any panics from reading by not returning that task
 func parseTaskFileRow(fileRow string) (string, time.Duration, error) {
-	// Handle panics from reading the duration
-	splitTask := strings.Split(fileRow, "	")
-	if len(splitTask) > 2 {
-		// Invalid row, can't parse
-		err := fmt.Errorf("ERROR!: Invalid row in a provided task file, can't parse %s", fileRow)
-		return "", 0, err
+	// Split the row into the quoted task and the duration
+	closeQuoteIndex := 0
+
+	for i, char := range fileRow {
+		if i != 0 {
+			// First character will always be the opening quote so can be skipped
+			if string(char) == "`" {
+				closeQuoteIndex = i + 1
+				break
+			}
+		}
 	}
 
-	task := splitTask[0]
-	if duration, err := parseDurationStr(splitTask[1]); err == nil {
+	task := strings.Trim(fileRow[:closeQuoteIndex], "`")
+	duration := strings.Trim(fileRow[closeQuoteIndex:], " ")
+
+	if duration, err := parseDurationStr(duration); err == nil {
 		return task, duration, nil
 	} else {
 		return "", 0, err
